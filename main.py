@@ -35,23 +35,35 @@ async def send_api_request(
     async with session.get(url, params=params) as response:
         return response.status, await response.json()
 
+
+async def get_osu_file(beatmap_id: int) -> tuple[int, bytes]:
+    url = f"https://old.ppy.sh/osu/{beatmap_id}"
+    async with session.get(url) as response:
+        return response.status, await response.read()
+
 # HTTP Server
 async def handle_connection(request: web.Request) -> web.Response:
-    if not str(request.path).startswith(config.http_prefix):
-        return web.Response(status=404)
+    if str(request.path).startswith(config.http_prefix):
+        if not compare_access_key(request.query.get("k")):
+            return web.Response(status=403)
 
-    if not compare_access_key(request.query.get("k")):
-        return web.Response(status=403)
+        endpoint = str(request.path).removeprefix(config.http_prefix)
+        params = dict(request.query)
 
-    endpoint = str(request.path).removeprefix(config.http_prefix)
-    params = dict(request.query)
+        try:
+            status, data = await send_api_request(endpoint, params)
+        except aiohttp.ClientError:
+            return web.Response(status=500)
 
-    try:
-        status, data = await send_api_request(endpoint, params)
-    except aiohttp.ClientError:
-        return web.Response(status=500)
+        return web.json_response(data, status=status)
 
-    return web.json_response(data, status=status)
+
+    elif str(request.path).startswith("/osu"):
+        beatmap_id = int(str(request.path).removeprefix("/osu/"))
+        status, res = await get_osu_file(beatmap_id)
+        return web.Response(body=res, status=status)
+
+    return web.Response(status=404)
 
 
 async def main() -> int:
